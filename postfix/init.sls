@@ -72,10 +72,27 @@ postfix_alias_absent_{{ user }}:
 {% endif %}
 {% endif %}
 
-# manage various mappings
-{% for mapping, data in salt['pillar.get']('postfix:mapping', {}).items() %}
-  {%- set need_postmap = False %}
-  {%- set file_path = salt['pillar.get']('postfix:config:' ~ mapping) %}
+{%- macro map_file(mapping, file_path, data, restricted=False) %}
+  {#- Lookup complete file with type spec from the config variable #}
+  {% set path = [] %}
+  {%- for item in salt['pillar.get']('postfix:config:{}'.format(mapping)) %}
+    {%- if item.split(':') | last == file_path %}
+      {%- do path.append(item) %}
+      {%- break %}
+    {%- endif %}
+  {%- endfor %}
+  {#- Sanity check #}
+  {%- if file_path | length() < 1 %}
+  test.fail_without_changes:
+    - name: Did not find {{ file_path }} in {{ mapping }} mapping
+    - failhard: True
+  {%- else %}
+  {%- set file_path = path | first %}
+  {#- Special handling needed for the maps with a preceeding parameter,
+  e.g. "check_recipient_access". Discard the prefix. #}
+  {%- if ' ' in file_path %}
+    {%- set file_path = file_path.split(' ', 1)[1] %}
+  {%- endif %}
   {%- if file_path.startswith('proxy:') %}
     {#- Discard the proxy:-prefix #}
     {%- set _, file_type, file_path = file_path.split(':') %}
@@ -89,14 +106,23 @@ postfix_alias_absent_{{ user }}:
   {%- endif %}
   {%- if file_type in ("btree", "cdb", "dbm", "hash", "sdbm") %}
     {%- set need_postmap = True %}
+  {%- else %}
+    {%- set need_postmap = False %}
   {%- endif %}
-postfix_{{ mapping }}:
+postfix_{{ mapping }}_{{ file_path.split('/') | last }}:
   file.managed:
     - name: {{ file_path }}
+    {%- if file_type in ("ldap", "memcache", "mysql", "nisplus", "pgsql", "sqlite") %}
+    {%- set restricted = True %}{#- Map configurations usually contain passwords, set files to restricted #}
+    - watch_in:
+      - service: postfix
+    - source: salt://postfix/files/mapping-cf.j2
+    {%- else %}
     - source: salt://postfix/files/mapping.j2
+    {%- endif %}
     - user: root
     - group: {{ postfix.root_grp }}
-    {%- if mapping.endswith('_sasl_password_maps') %}
+    {%- if mapping.endswith('_sasl_password_maps') or restricted %}
     - mode: 600
     {%- else %}
     - mode: 644
@@ -115,4 +141,23 @@ postfix_{{ mapping }}:
     - watch_in:
       - service: postfix
   {%- endif %}
-{% endfor %}
+  {%- endif %}
+{%- endmacro %}
+
+# manage various mappings
+{%- for mapping, data in salt['pillar.get']('postfix:mapping', {}).items() %}
+  {%- if data is mapping %}
+    {%- for mapping_path, data in data.items() %}
+      {{ map_file(mapping, mapping_path, data) }}
+    {%- endfor %}
+  {%- else %}
+    {%- set mapping_paths = salt['pillar.get']('postfix:config:' ~ mapping) %}
+    {%- if mapping_paths is string %}
+      {{ map_file(mapping, mapping_paths, data) }}
+    {%- elif mapping_paths is iterable and data is iterable %}
+      {%- for mapping_path in mapping_paths[0:data|length] %}
+        {{ map_file(mapping ~ '_' ~ salt['file.basename'](mapping_path), mapping_path, data[loop.index0]) }}
+      {%- endfor %}
+    {%- endif %}
+  {%- endif %}
+{%- endfor %}
