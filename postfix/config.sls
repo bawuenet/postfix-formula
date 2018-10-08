@@ -22,44 +22,6 @@ include:
       - service: postfix
     - template: jinja
 
-{% if 'vmail' in pillar.get('postfix', '') %}
-{{ postfix.config_path }}/virtual_alias_maps.cf:
-  file.managed:
-    - source: salt://postfix/files/virtual_alias_maps.cf
-    - user: root
-    - group: postfix
-    - mode: 640
-    - require:
-      - pkg: postfix
-    - watch_in:
-      - service: postfix
-    - template: jinja
-
-{{ postfix.config_path }}/virtual_mailbox_domains.cf:
-  file.managed:
-    - source: salt://postfix/files/virtual_mailbox_domains.cf
-    - user: root
-    - group: postfix
-    - mode: 640
-    - require:
-      - pkg: postfix
-    - watch_in:
-      - service: postfix
-    - template: jinja
-
-{{ postfix.config_path }}/virtual_mailbox_maps.cf:
-  file.managed:
-    - source: salt://postfix/files/virtual_mailbox_maps.cf
-    - user: root
-    - group: postfix
-    - mode: 640
-    - require:
-      - pkg: postfix
-    - watch_in:
-      - service: postfix
-    - template: jinja
-{% endif %}
-
 {% if salt['pillar.get']('postfix:manage_master_config', True) %}
 {{ postfix.config_path }}/master.cf:
   file.managed:
@@ -72,27 +34,6 @@ include:
     - watch_in:
       - service: postfix
     - template: jinja
-{% endif %}
-
-{% if 'transport' in pillar.get('postfix', '') %}
-{{ postfix.config_path }}/transport:
-  file.managed:
-    - source: salt://postfix/files/transport
-    - user: root
-    - group: {{ postfix.root_grp }}
-    - mode: 644
-    - require:
-      - pkg: postfix
-    - watch_in:
-      - service: postfix
-    - template: jinja
-
-run-postmap:
-  cmd.wait:
-    - name: {{ postfix.xbin_prefix }}/sbin/postmap {{ postfix.config_path }}/transport
-    - cwd: /
-    - watch:
-      - file: {{ postfix.config_path }}/transport
 {% endif %}
 
 {%- for domain in salt['pillar.get']('postfix:certificates', {}).keys() %}
