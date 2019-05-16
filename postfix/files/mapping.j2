@@ -24,7 +24,8 @@
 {%- if item is string %}
 {{ item }}
 {%- else %}
-{{ format_value(item.keys()[0], item.values()[0]) }}
+{%-   set key, value = item.popitem() %}
+{{ format_value(key, value) }}
 {%- endif %}
 {%- endfor -%}
 {%- endif %}
