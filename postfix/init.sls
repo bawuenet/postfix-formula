@@ -82,9 +82,10 @@ postfix_alias_absent_{{ user }}:
     {%- endif %}
   {%- endfor %}
   {#- Sanity check #}
-  {%- if file_path | length() < 1 %}
+  {%- if path | length() < 1  %}
+postfix_map_failure_{{ file_path | replace('/', '_') }}:
   test.fail_without_changes:
-    - name: Did not find {{ file_path }} in {{ mapping }} mapping
+    - name: Did not find mapping {{ file_path }} referenced in postfix:config:{{ mapping }}.
     - failhard: True
   {%- else %}
   {%- set file_path = path | first %}
