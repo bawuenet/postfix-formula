@@ -25,7 +25,7 @@ include:
 {% if salt['pillar.get']('postfix:manage_master_config', True) %}
 {{ postfix.config_path }}/master.cf:
   file.managed:
-    - source: salt://postfix/files/master.cf
+    - source: salt://postfix/files/master.cf.j2
     - user: root
     - group: {{ postfix.root_grp }}
     - mode: 644

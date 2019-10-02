@@ -51,14 +51,14 @@ provisioner:
                chroot: false
                type: unix
                extras: '-o smtp_bind_address=127.0.0.1 -o syslog_name=relay1'
-               no_args: True
+               servicetype: internal
              relay2:
                wrap: True
                command: smtp
                chroot: false
                type: unix
                extras: '-o smtp_bind_address=127.0.0.2 -o syslog_name=relay2'
-               no_args: True
+               servicetype: internal
 
 
 verifier:

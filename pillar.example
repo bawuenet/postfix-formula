@@ -21,6 +21,16 @@ postfix:
       tlsproxy:
         enable: True
         chroot: True
+      relay1:
+        command: smtp
+        chroot: false
+        type: unix
+        args:
+          - '-o smtp_bind_address=127.0.0.1'
+          - '-o syslog_name=relay1'
+        # Servicetype internal is used for postfix internal services such as an
+        # additional smtp listener or delivery process
+        servicetype: internal
       uucp:
         enable: True
       # Dovecot delivery via deliver binary. For better performance, investigate
@@ -35,6 +45,9 @@ postfix:
         unpriv: False
         user: vmail:vmail
         argv: /usr/lib/dovecot/deliver
+        # Servicetype external is used for postfix external services such as a
+        # local delivery service
+        servicetype: external
       # Completely customized mail-delivery-agent entry. Will be appended to the
       # master.cf file
       custom-mda:
@@ -45,9 +58,7 @@ postfix:
         user: mail
         # Wrap the output in master.cf at 78 chars for better readability
         wrap: True
-        # Avoid user and arvg settings to allow define internal processes
-        # needed for randomizing relay IP (randmap functionality)
-        no_args: True
+        servicetype: mda
 
     # Backwards compatible definition of dovecot delivery in master.cf
     enable_dovecot: False

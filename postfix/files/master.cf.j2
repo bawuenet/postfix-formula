@@ -2,12 +2,94 @@
 {%- set master_config = salt['pillar.get']('postfix:master_config', {}) -%}
 {% import_yaml "postfix/services.yaml" as postfix_master_services %}
 
+{#- ######################## -#}
+{#- Macro defintions go here -#}
+{#- ######################## -#}
+
+{%- macro internal_service(service_name) -%}
+{%-   do handled_services.append(service_name) -%}
+{#-   Try to get the service configuration from the pillar if present.
+ #    Next try if the service has been dynamically configured and is present in
+ #    the additional_services dictionary.
+ #    If absent, fall back to the defaults provided in services.yaml -#}
+{%-   set service = salt['pillar.get']('postfix:master_config:services:%s' % (
+                                         service_name,),
+                                         additional_services.get(service_name,
+                                         postfix_master_services.defaults[service_name])) -%}
+{%-   if service.get('enable', True) -%}
+{%-     set comment = '' -%}
+{%-   else -%}
+{%-     set comment = '#' -%}
+{%-   endif %}
+{{ "%s%-9s %-5s %-7s %-7s %-7s %-7s %-7s %s" | format(comment,
+                                               service_param(service, service_name, 'service', service_name),
+                                               service_param(service, service_name, 'type'),
+                                               service_param(service, service_name, 'private'),
+                                               service_param(service, service_name, 'unpriv'),
+                                               service_param(service, service_name, 'chroot'),
+                                               service_param(service, service_name, 'wakeup'),
+                                               service_param(service, service_name, 'maxproc'),
+                                               service_param(service, service_name, 'command', service_name)) -}}
+{%-   if service.args is not none -%}
+{%-     for option in service.get('args', postfix_master_services.defaults[
+                                            service_name].get('args', [])) -%}
+{%-       if option.startswith('#') %}
+{{ option }}
+{%-       else %}
+{{ comment }}  {{ option }}
+{%-       endif %}
+{%-     endfor %}
+{%-   endif %}
+{%- endmacro -%}
+
+{%- macro external_service(service_name, wrap=False) -%}
+{%-   do handled_services.append(service_name) -%}
+{%-   set service = salt['pillar.get']('postfix:master_config:services:%s' % (
+                                         service_name,),
+                                         postfix_master_services.defaults[service_name]) -%}
+{%-   if service.get('enable', True) -%}
+{%-     set comment = '' -%}
+{%-   else -%}
+{%-     set comment = '#' -%}
+{%-   endif -%}
+{{    "%s%-9s %-5s %-7s %-7s %-7s %-7s %-7s %s" | format(comment,
+                                               service_param(service, service_name, 'service', service_name),
+                                               service_param(service, service_name, 'type'),
+                                               service_param(service, service_name, 'private'),
+                                               service_param(service, service_name, 'unpriv'),
+                                               service_param(service, service_name, 'chroot'),
+                                               service_param(service, service_name, 'wakeup'),
+                                               service_param(service, service_name, 'maxproc'),
+                                               service_param(service, service_name, 'command', service_name)) }}
+{%-   if 'flags' in service or 'flags' in postfix_master_services.defaults[service_name] -%}
+{%-     set parameter_str = "%s  flags=%s user=%s argv=%s %s" | format(comment,
+                                            service_param(service, service_name, 'flags'),
+                                            service_param(service, service_name, 'user'),
+                                            service_param(service, service_name, 'argv'),
+                                            service_param(service, service_name, 'extras', '')) -%}
+{%-   else -%}
+{%-      set parameter_str = "%s  user=%s argv=%s %s" | format(comment,
+                                            service_param(service, service_name, 'user'),
+                                            service_param(service, service_name, 'argv'),
+                                            service_param(service, service_name, 'extras', '')) -%}
+{%-   endif -%}
+{%-   if wrap %}
+{{      parameter_str | wordwrap(width=wrap, break_long_words=False, wrapstring='\n%s  ' | format(comment)) }}
+{%-   else %}
+{{      parameter_str }}
+{%-   endif -%}
+{%- endmacro -%}
+
+
+{#- ####################################### -#}
+{#- Backwards compatibility handler go here -#}
+{#- ####################################### -#}
 {#-
  # Handle the case that the pillar data does not provide any service
  # configuration but submission parameters are provided in the pillar.
  # This is important for backwards compatibility with sites that are using
  # the previous enable_submission pillar settings.
- -#}
+-#}
 {%- set additional_services = {} -%}
 {%- if master_config.get('enable_submission', False) and not salt[
         'pillar.get']('postfix:master_config:services:submission', False)  -%}
@@ -43,6 +125,33 @@
 {%-   endif -%}
 {%- endif -%}
 
+{#- Handle legacy configuration of services for backwards compatibility
+    by extending the services dictionary accordingly #}
+{%- set handled_services = [] -%}
+{%- if salt['pillar.get']('postfix:policyd-spf:enabled', False) %}
+{%-   do postfix_master_services.defaults.update({'policy-spf': {
+                                                    'command': 'spawn',
+                                                    'chroot': False,
+                                                    'enable': True,
+                                                    'type': 'unix',
+                                                    'unpriv': False,
+                                                    'user': 'nobody',
+                                                    'argv': '%s/bin/policyd-spf' | format(postfix.xbin_prefix)}}) %}
+{%- endif %}
+{%- if master_config.get('enable_dovecot', False) -%}
+{%-   set dovecot = master_config.get('dovecot', {} )%}
+{%-   do postfix_master_services.defaults.update({'dovecot': {
+                                                    'command': 'pipe',
+                                                    'chroot': False,
+                                                    'enable': True,
+                                                    'extras': '-d ${recipient}',
+                                                    'flags': dovecot.get('flags', 'DRhu'),
+                                                    'type': 'unix',
+                                                    'unpriv': False,
+                                                    'user': '%s:%s' | format(dovecot.get('user', 'vmail'), dovecot.get('group', 'vmail')),
+                                                    'argv': dovecot.get('argv', postfix.dovecot_deliver) }}) %}
+{%- endif %}
+
 {#- Format the postfix service parameters correctly -#}
 {%- macro service_param(service, service_name, parameter_name, default='-') -%}
   {#- Fetch the value from the passed service dictionary or fall back to the
@@ -75,109 +184,17 @@ y
 # service type  private unpriv  chroot  wakeup  maxproc command + args
 #               (yes)   (yes)   (no)    (never) (100)
 # ==========================================================================
-{%- for service_name in postfix_master_services.order %}
-{#-   Try to get the service configuration from the pillar if present.
- #    Next try if the service has been dynamically configured and is present in
- #    the additional_services dictionary.
- #    If absent, fall back to the defaults provided in services.jinja -#}
-{%-   set service = salt['pillar.get']('postfix:master_config:services:%s' % (
-                                         service_name,),
-                                         additional_services.get(service_name,
-                                         postfix_master_services.defaults[service_name])) -%}
-{%-   if service.get('enable', True) -%}
-{%-     set comment = '' -%}
-{%-   else -%}
-{%-     set comment = '#' -%}
-{%-   endif %}
-{{ "%s%-9s %-5s %-7s %-7s %-7s %-7s %-7s %s" | format(comment,
-                                               service_param(service, service_name, 'service', service_name),
-                                               service_param(service, service_name, 'type'),
-                                               service_param(service, service_name, 'private'),
-                                               service_param(service, service_name, 'unpriv'),
-                                               service_param(service, service_name, 'chroot'),
-                                               service_param(service, service_name, 'wakeup'),
-                                               service_param(service, service_name, 'maxproc'),
-                                               service_param(service, service_name, 'command', service_name)) -}}
-{%-   if service.args is not none -%}
-{%-     for option in service.get('args', postfix_master_services.defaults[
-                                            service_name].get('args', [])) -%}
-{%-       if option.startswith('#') %}
-{{ option }}
-{%-       else %}
-{{ comment }}  {{ option }}
-{%-       endif %}
-{%-     endfor %}
-{%-   endif %}
+{%- for service_name in postfix_master_services.order -%}
+{{ internal_service(service_name) }}
+{%- endfor %}
+{#- Handle custom internal services configured as pillars -#}
+{%- for service in salt['pillar.get']('postfix:master_config:services', []) if salt['pillar.get']('postfix#master_config#services#%s#servicetype' % (service,), delimiter='#') == 'internal' and not service in postfix_master_services.order -%}
+{%-  do postfix_master_services.defaults.update({service: salt['pillar.get']('postfix#master_config#services#%s' % (service,), delimiter='#')}) -%}
+{%- endfor -%}
+{%- for service in postfix_master_services.defaults if not service in postfix_master_services.order and salt['pillar.get']('postfix#master_config#services#%s#servicetype' % (service,), delimiter='#') == 'internal' -%}
+{{    internal_service(service) }}
 {%- endfor %}
 #
-{%- set handled_extra_services = [] -%}
-{%- macro extra_service(service_name, wrap=False) -%}
-{%-   do handled_extra_services.append(service_name) -%}
-{%-   set service = salt['pillar.get']('postfix:master_config:services:%s' % (
-                                         service_name,),
-                                         postfix_master_services.defaults[service_name]) -%}
-{%-   if service.get('enable', True) -%}
-{%-     set comment = '' -%}
-{%-   else -%}
-{%-     set comment = '#' -%}
-{%-   endif -%}
-{{    "%s%-9s %-5s %-7s %-7s %-7s %-7s %-7s %s" | format(comment,
-                                               service_param(service, service_name, 'service', service_name),
-                                               service_param(service, service_name, 'type'),
-                                               service_param(service, service_name, 'private'),
-                                               service_param(service, service_name, 'unpriv'),
-                                               service_param(service, service_name, 'chroot'),
-                                               service_param(service, service_name, 'wakeup'),
-                                               service_param(service, service_name, 'maxproc'),
-                                               service_param(service, service_name, 'command', service_name)) }}
-{%-   if 'no_args' in service -%}
-{%-     set parameter_str = "%s %s" | format(comment,service_param(service, service_name, 'extras', '')) -%}
-{%-   else -%}
-{%-   if 'flags' in service or 'flags' in postfix_master_services.defaults[service_name] -%}
-{%-     set parameter_str = "%s  flags=%s user=%s argv=%s %s" | format(comment,
-                                            service_param(service, service_name, 'flags'),
-                                            service_param(service, service_name, 'user'),
-                                            service_param(service, service_name, 'argv'),
-                                            service_param(service, service_name, 'extras', '')) -%}
-{%-   else -%}
-{%-      set parameter_str = "%s  user=%s argv=%s %s" | format(comment,
-                                            service_param(service, service_name, 'user'),
-                                            service_param(service, service_name, 'argv'),
-                                            service_param(service, service_name, 'extras', '')) -%}
-{%-   endif -%}
-{%-   endif -%}{# if 'no_args' in service #}
-{%-   if wrap %}
-{{      parameter_str | wordwrap(width=wrap, break_long_words=False, wrapstring='\n%s  ' | format(comment)) }}
-{%-   else %}
-{{      parameter_str }}
-{%-   endif -%}
-{%- endmacro -%}
-
-{#- Handle legacy configuration of services for backwards compatibility
-    by extending the services dictionary accordingly #}
-{%- if salt['pillar.get']('postfix:policyd-spf:enabled', False) %}
-{%-   do postfix_master_services.defaults.update({'policy-spf': {
-                                                    'command': 'spawn',
-                                                    'chroot': False,
-                                                    'enable': True,
-                                                    'type': 'unix',
-                                                    'unpriv': False,
-                                                    'user': 'nobody',
-                                                    'argv': '%s/bin/policyd-spf' | format(postfix.xbin_prefix)}}) %}
-{%- endif %}
-{%- if master_config.get('enable_dovecot', False) -%}
-{%-   set dovecot = master_config.get('dovecot', {} )%}
-{%-   do postfix_master_services.defaults.update({'dovecot': {
-                                                    'command': 'pipe',
-                                                    'chroot': False,
-                                                    'enable': True,
-                                                    'extras': '-d ${recipient}',
-                                                    'flags': dovecot.get('flags', 'DRhu'),
-                                                    'type': 'unix',
-                                                    'unpriv': False,
-                                                    'user': '%s:%s' | format(dovecot.get('user', 'vmail'), dovecot.get('group', 'vmail')),
-                                                    'argv': dovecot.get('argv', postfix.dovecot_deliver) }}) %}
-{%- endif %}
 # ====================================================================
 # Interfaces to non-Postfix software. Be sure to examine the manual
 # pages of the non-Postfix software to find out what options it wants.
@@ -190,7 +207,7 @@ y
 # maildrop. See the Postfix MAILDROP_README file for details.
 # Also specify in main.cf: maildrop_destination_recipient_limit=1
 #
-{{ extra_service('maildrop') }}
+{{ external_service('maildrop') }}
 #
 # ====================================================================
 #
@@ -208,42 +225,42 @@ y
 # Cyrus 2.1.5 (Amos Gouaux)
 # Also specify in main.cf: cyrus_destination_recipient_limit=1
 #
-{{ extra_service('cyrus') }}
+{{ external_service('cyrus') }}
 #
 # ====================================================================
 #
 # Old example of delivery via Cyrus.
 #
-{{ extra_service('old-cyrus') }}
+{{ external_service('old-cyrus') }}
 #
 # ====================================================================
 #
 # See the Postfix UUCP_README file for configuration details.
 #
-{{ extra_service('uucp') }}
+{{ external_service('uucp') }}
 #
 # ====================================================================
 #
 # Other external delivery methods.
 #
-{{ extra_service('ifmail') }}
+{{ external_service('ifmail') }}
 #
-{{ extra_service('bsmtp') }}
+{{ external_service('bsmtp') }}
 #
-{{ extra_service('scalemail-backend', 79) }}
+{{ external_service('scalemail-backend', 79) }}
 #
-{{ extra_service('mailman', 79) }}
+{{ external_service('mailman', 79) }}
 {#- Handle custom services configured as pillars by extending the services
     dictionary for all defined services that have not been otherwise be
     handled yet. -#}
-{%- for service in salt['pillar.get']('postfix:master_config:services', []) if not service in handled_extra_services -%}
+{%- for service in salt['pillar.get']('postfix:master_config:services', []) if salt['pillar.get']('postfix:master_config:services:%s:servicetype' % (service,)) == 'external' and not service in handled_external_services -%}
 {%-  do postfix_master_services.defaults.update({service: salt['pillar.get']('postfix:master_config:services:%s' % (service,))}) -%}
 {%- endfor -%}
-{%- for service in postfix_master_services.defaults if not service in handled_extra_services and not service in postfix_master_services.order %}
+{%- for service in postfix_master_services.defaults if not service in handled_services and not service in postfix_master_services.order %}
 #
 {%-   if postfix_master_services.defaults[service].get('wrap', False) %}
-{{      extra_service(service, 78) }}
+{{      external_service(service, 78) }}
 {%-   else %}
-{{      extra_service(service) }}
+{{      external_service(service) }}
 {%-   endif %}
 {%- endfor %}
